@@ -9,6 +9,7 @@ import pysrt
 from datetime import timedelta
 import subprocess
 import tempfile
+from pydub import AudioSegment, effects
 
 args = sys.argv
 
@@ -50,30 +51,26 @@ def load_video(path):
             print(path,"does not appear to be a valid video")
 
 def ffmpeg_normalize(video):
-    script_location = os.path.realpath(os.path.dirname(__file__))
-    ffmpeg_location = os.path.join(script_location,'ffmpeg.exe')
-    temp_input = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-    temp_input_path = temp_input.name
-    temp_output = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-    temp_output_path = temp_output.name
-    audio = video.audio
-    audio.write_audiofile(temp_input_path)
+    if video.audio: #Don't try to normalize a clip without audio!
+        script_location = os.path.realpath(os.path.dirname(__file__))
+        temp_input = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        temp_input_path = temp_input.name
+        temp_output = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+        temp_output_path = temp_output.name
+    
+        audio = video.audio
+        audio.write_audiofile(temp_input_path)
 
-    ffmpeg_command = [
-        ffmpeg_location,
-        "-y",
-        "-i", temp_input_path,
-        "-filter:a", "speechnorm",
-        "-c:v", "copy",
-        temp_output_path
-    ]
+        temp_audio = AudioSegment.from_file(temp_input_path)
+        normalized_audio = effects.normalize(temp_audio)
+        normalized_audio.export(temp_output_path, format='mp3')
 
-    subprocess.run(ffmpeg_command, check=True)
+        normalized_audio_import = AudioFileClip(temp_output_path)
+        video = video.set_audio(normalized_audio_import)
+        
+        temp_input.close()
+        temp_output.close()
 
-    normalized_audio = AudioFileClip(temp_output_path)
-    video.set_audio(normalized_audio)
-    temp_input.close()
-    temp_output.close()
     return video
 
 def validate_clipslist(clipslist):
