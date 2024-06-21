@@ -38,39 +38,59 @@ def load_videoconfig():
         print('Invaid videoconfig file')
 
 def load_video(path):
-    if is_file(path):
-        try:
-            video_clip = VideoFileClip(path)
-            if arguments.normalize:
-                clip = ffmpeg_normalize(video_clip)
-            else:
-                clip = video_clip
-            print("Clip loaded:",path)
-            return clip
-        except OSError:
-            print(path,"does not appear to be a valid video")
+    video_clip = VideoFileClip(path)
+    if arguments.normalize:
+        clip = ffmpeg_normalize(video_clip)
+    else:
+        clip = video_clip
+    # print("Clip loaded:",path)
+    return clip
+
+
 
 def ffmpeg_normalize(video):
     if video.audio: #Don't try to normalize a clip without audio!
-        script_location = os.path.realpath(os.path.dirname(__file__))
-        temp_input = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        temp_input_path = temp_input.name
-        temp_output = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
-        temp_output_path = temp_output.name
-    
-        audio = video.audio
-        audio.write_audiofile(temp_input_path)
-
-        temp_audio = AudioSegment.from_file(temp_input_path)
-        normalized_audio = effects.normalize(temp_audio)
-        normalized_audio.export(temp_output_path, format='mp3')
-
-        normalized_audio_import = AudioFileClip(temp_output_path)
-        video = video.set_audio(normalized_audio_import)
+        if not cache_dir: #Cache dir is not present, use temporary files
+            temp_input = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+            temp_input_path = temp_input.name
+            temp_output = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+            temp_output_path = temp_output.name
         
-        temp_input.close()
-        temp_output.close()
+            audio = video.audio
+            audio.write_audiofile(temp_input_path)
 
+            temp_audio = AudioSegment.from_file(temp_input_path)
+            normalized_audio = effects.normalize(temp_audio)
+            normalized_audio.export(temp_output_path, format='mp3')
+
+            normalized_audio_import = AudioFileClip(temp_output_path)
+            video = video.set_audio(normalized_audio_import)
+            
+            temp_input.close()
+            temp_output.close()
+        
+        else:
+            video_file_name = os.path.splitext(os.path.split(video.filename)[1])[0]
+            norm_audio_file = os.path.join(cache_dir,video_file_name+"_normalized.mp3")
+
+            if not os.path.isfile(norm_audio_file) or is_newer(norm_audio_file,video.filename):
+                print("Updating cache for normalized audio:",video_file_name)
+                raw_audio = tempfile.NamedTemporaryFile(suffix=".mp3", delete=False)
+                raw_audio_file = raw_audio.name
+                audio = video.audio
+                audio.write_audiofile(raw_audio_file)
+
+                temp_audio = AudioSegment.from_file(raw_audio_file)
+                normalized_audio = effects.normalize(temp_audio)
+                normalized_audio.export(norm_audio_file, format='mp3')
+
+                raw_audio.close()
+            else:
+                print('Using cached audio for',video.filename)
+            
+            normalized_audio_import = AudioFileClip(norm_audio_file)
+            video = video.set_audio(normalized_audio_import)
+                    
     return video
 
 def validate_clipslist(clipslist):
@@ -98,11 +118,19 @@ def sum_time_to(clipname):
             break
     return sum
 
+def is_newer(file_a,file_b): #Returns False if A is newer, True if B is newer
+    file_a_mod_time = os.path.getmtime(file_a)
+    file_b_mod_time = os.path.getmtime(file_b)
+    return file_b_mod_time > file_a_mod_time
+
+
+
 #print(arguments)
 
 videoconfig = load_videoconfig()
 config_path = os.path.abspath(arguments.videoconfig)
 config_dir = os.path.split(config_path)[0]
+cache_dir = os.path.join(config_dir,"cache") if os.path.isdir(os.path.join(config_dir,"cache")) else False
 title = videoconfig['Title']
 
 output_file = os.path.join(config_dir,title+".mp4")
